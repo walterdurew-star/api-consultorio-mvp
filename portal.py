@@ -72,7 +72,6 @@ if menu == "Portal del Paciente":
 elif menu == "Panel del Doctor 👨‍⚕️":
     st.title("👨‍⚕️ Panel de Administración ERP")
     
-    # SISTEMA DE LOGIN MEJORADO
     if not st.session_state.logged_in:
         password = st.text_input("Ingresa la clave de acceso:", type="password")
         if password == "admin123":
@@ -86,11 +85,80 @@ elif menu == "Panel del Doctor 👨‍⚕️":
             st.session_state.logged_in = False
             st.rerun()
             
-        tab1, tab2, tab3, tab4 = st.tabs(["📅 Agenda", "⚙️ Servicios y Costos", "💰 Finanzas", "📦 Inventario"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📅 Agenda", "⚙️ Servicios y Costos", "💰 Finanzas", "📦 Inventario", "🩺 Historial Clínico"])
         
         # --- PESTAÑA 1: AGENDA ---
         with tab1:
-            st.subheader("Turnos Pendientes de Atención")
+            with st.expander("➕ Agendar Turno Manual (Teléfono / Presencial)", expanded=False):
+                try:
+                    res_serv_manual = requests.get(f"{API_URL}/servicios/").json()
+                    catalogo_manual = [s["nombre"] for s in res_serv_manual] if res_serv_manual else []
+                    pacientes_manual = requests.get(f"{API_URL}/pacientes/").json()
+                except:
+                    catalogo_manual = []
+                    pacientes_manual = []
+
+                if catalogo_manual:
+                    tab_nuevo, tab_exist = st.tabs(["👤 Nuevo Paciente", "👥 Paciente Existente"])
+                    
+                    with tab_nuevo:
+                        with st.form("form_manual_nuevo", clear_on_submit=True):
+                            col_n1, col_n2 = st.columns(2)
+                            with col_n1:
+                                nom_m = st.text_input("Nombre y Apellido")
+                            with col_n2:
+                                tel_m = st.text_input("Teléfono")
+                            
+                            col_f1, col_f2 = st.columns(2)
+                            with col_f1:
+                                fec_m = st.date_input("Fecha del turno", key="fec_m")
+                            with col_f2:
+                                hor_m = st.time_input("Hora", key="hor_m")
+                                
+                            trat_m = st.multiselect("Tratamiento(s)", catalogo_manual, key="trat_m")
+                            
+                            if st.form_submit_button("Agendar Nuevo Paciente"):
+                                if nom_m and tel_m and trat_m:
+                                    rp = requests.post(f"{API_URL}/pacientes/", json={"nombre_completo": nom_m, "telefono": tel_m})
+                                    if rp.status_code == 200:
+                                        p_id = rp.json()["id"]
+                                        f_h = f"{fec_m}T{hor_m.strftime('%H:%M:%S')}"
+                                        requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_m)})
+                                        st.success("¡Turno guardado exitosamente!")
+                                        st.rerun()
+                                else:
+                                    st.warning("Completa nombre, teléfono y tratamientos.")
+
+                    with tab_exist:
+                        if pacientes_manual:
+                            with st.form("form_manual_exist", clear_on_submit=True):
+                                dic_pac_exist = {f"{p['nombre_completo']} - {p['telefono']}": p["id"] for p in pacientes_manual}
+                                pac_sel_exist = st.selectbox("Buscar Paciente", ["Seleccionar..."] + list(dic_pac_exist.keys()))
+                                
+                                col_f1e, col_f2e = st.columns(2)
+                                with col_f1e:
+                                    fec_me = st.date_input("Fecha del turno", key="fec_me")
+                                with col_f2e:
+                                    hor_me = st.time_input("Hora", key="hor_me")
+                                    
+                                trat_me = st.multiselect("Tratamiento(s)", catalogo_manual, key="trat_me")
+                                
+                                if st.form_submit_button("Agendar a Paciente Existente"):
+                                    if pac_sel_exist != "Seleccionar..." and trat_me:
+                                        p_id = dic_pac_exist[pac_sel_exist]
+                                        f_h = f"{fec_me}T{hor_me.strftime('%H:%M:%S')}"
+                                        requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_me)})
+                                        st.success("¡Turno guardado exitosamente!")
+                                        st.rerun()
+                                    else:
+                                        st.warning("Selecciona un paciente y los tratamientos.")
+                        else:
+                            st.info("Aún no hay pacientes registrados.")
+                else:
+                    st.warning("Para agendar manualmente, primero debes cargar Servicios en la pestaña correspondiente.")
+
+            st.write("---")
+            st.subheader("📋 Turnos Pendientes de Atención")
             try:
                 turnos = requests.get(f"{API_URL}/turnos/").json()
                 pacientes = requests.get(f"{API_URL}/pacientes/").json()
@@ -103,7 +171,17 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                 if turnos_pendientes:
                     for turno in turnos_pendientes:
                         paciente = dic_pacientes.get(turno["paciente_id"], {})
-                        with st.expander(f"🦷 {paciente.get('nombre_completo', 'N/A')} - {turno['fecha_hora'][:10]}"):
+                        
+                        # --- MEJORA: MOSTRAR FECHA Y HORA SEPARADAS ---
+                        fecha_hora_raw = turno['fecha_hora']
+                        if "T" in fecha_hora_raw:
+                            fecha_t, hora_t = fecha_hora_raw.split("T")
+                            hora_limpia = hora_t[:5] # Se queda solo con HH:MM
+                            titulo_expander = f"🦷 {paciente.get('nombre_completo', 'N/A')} | 📅 {fecha_t} | ⏰ {hora_limpia} hs"
+                        else:
+                            titulo_expander = f"🦷 {paciente.get('nombre_completo', 'N/A')} - {fecha_hora_raw}"
+                        
+                        with st.expander(titulo_expander):
                             st.write(f"**Tratamiento:** {turno['tratamiento']}")
                             st.write(f"**Estado del Turno:** {turno['estado']}")
                             
@@ -120,7 +198,7 @@ elif menu == "Panel del Doctor 👨‍⚕️":
             except:
                 st.error("Esperando conexión...")
 
-        # --- PESTAÑA 2: CARGAR, EDITAR Y BORRAR SERVICIOS ---
+        # --- PESTAÑA 2: SERVICIOS ---
         with tab2:
             st.subheader("Agregar Servicio Nuevo")
             with st.form("form_servicios", clear_on_submit=True):
@@ -147,21 +225,17 @@ elif menu == "Panel del Doctor 👨‍⚕️":
             try:
                 res_serv_admin = requests.get(f"{API_URL}/servicios/").json()
                 if res_serv_admin:
-                    # Mostrar la lista visual primero
                     with st.expander("👀 Ver Lista Completa de Servicios", expanded=False):
                         for s in res_serv_admin:
                             st.write(f"**{s['nombre']}** | Precio: ₲ {s['precio_sugerido']:,}".replace(",", ".") + f" | Costo: ₲ {s['costo_real']:,}".replace(",", "."))
                     
-                    # El menú para editar (Con el BUG SOLUCIONADO)
                     opciones_serv = {s["nombre"]: s for s in res_serv_admin}
                     serv_sel = st.selectbox("Selecciona un servicio para modificar:", list(opciones_serv.keys()))
                     
                     if serv_sel:
                         datos_s = opciones_serv[serv_sel]
-                        
                         col_e1, col_e2, col_e3 = st.columns(3)
                         with col_e1:
-                            # Se agregó el ID al final del "key" para evitar el bug de memoria
                             edit_nombre = st.text_input("Nombre", value=datos_s["nombre"], key=f"en_{datos_s['id']}")
                         with col_e2:
                             edit_precio = st.text_input("Precio (₲)", value=f"{datos_s['precio_sugerido']:,}".replace(",","."), key=f"ep_{datos_s['id']}")
@@ -179,12 +253,10 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                             if st.button("🚨 Borrar Servicio"):
                                 requests.delete(f"{API_URL}/servicios/{datos_s['id']}")
                                 st.rerun()
-                else:
-                    st.write("No hay servicios cargados.")
             except:
                 pass
 
-        # --- PESTAÑA 3: FINANZAS E INTELIGENCIA DE NEGOCIO ---
+        # --- PESTAÑA 3: FINANZAS ---
         with tab3:
             st.subheader("Dashboard Financiero")
             try:
@@ -247,9 +319,9 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                 else:
                     st.success("No hay turnos pendientes de cobro.")
             except:
-                st.warning("Cargando datos financieros...")
+                pass
 
-        # --- PESTAÑA 4: CARGAR, EDITAR Y BORRAR INVENTARIO ---
+        # --- PESTAÑA 4: INVENTARIO ---
         with tab4:
             st.subheader("📦 Agregar Material Nuevo")
             with st.form("form_inventario", clear_on_submit=True):
@@ -274,18 +346,15 @@ elif menu == "Panel del Doctor 👨‍⚕️":
             try:
                 inventario = requests.get(f"{API_URL}/inventario/").json()
                 if inventario:
-                    # Lista visual restaurada
                     with st.expander("📦 Ver Todo el Stock Actual", expanded=True):
                         for item in inventario:
                             st.info(f"**{item['nombre_material']}** | Cantidad: {item['cantidad']} | Costo Un.: ₲ {item['costo_unitario']:,}".replace(",", "."))
 
-                    # El menú para editar (Con el BUG SOLUCIONADO)
                     opciones_inv = {i["nombre_material"]: i for i in inventario}
                     inv_sel = st.selectbox("Selecciona un material para modificar:", list(opciones_inv.keys()))
                     
                     if inv_sel:
                         datos_i = opciones_inv[inv_sel]
-                        
                         col_i1, col_i2, col_i3 = st.columns(3)
                         with col_i1:
                             edit_mat = st.text_input("Material", value=datos_i["nombre_material"], key=f"im_{datos_i['id']}")
@@ -304,7 +373,70 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                             if st.button("🚨 Borrar Material"):
                                 requests.delete(f"{API_URL}/inventario/{datos_i['id']}")
                                 st.rerun()
-                else:
-                    st.write("El inventario está vacío.")
             except:
                 pass
+
+        # --- PESTAÑA 5: HISTORIAL CLÍNICO ---
+        with tab5:
+            st.subheader("🩺 Historial Clínico de Pacientes")
+            
+            try:
+                pacientes_hist = requests.get(f"{API_URL}/pacientes/").json()
+                
+                if pacientes_hist:
+                    dic_pacientes_hist = {f"{p['nombre_completo']} ({p['telefono']})": p["id"] for p in pacientes_hist}
+                    opciones_pacientes = ["Seleccionar paciente..."] + list(dic_pacientes_hist.keys())
+                    paciente_seleccionado = st.selectbox("👤 Buscar Paciente:", opciones_pacientes)
+                    
+                    if paciente_seleccionado != "Seleccionar paciente...":
+                        pac_id = dic_pacientes_hist[paciente_seleccionado]
+                        nombre_limpio = paciente_seleccionado.split(' (')[0]
+                        
+                        st.write("---")
+                        st.write(f"### 📂 Carpeta Médica: {nombre_limpio}")
+                        
+                        todos_historiales = requests.get(f"{API_URL}/historial/").json()
+                        historial_paciente = [h for h in todos_historiales if h["paciente_id"] == pac_id]
+                        
+                        if historial_paciente:
+                            for ficha in reversed(historial_paciente):
+                                with st.expander(f"🗓️ Fecha: {ficha['fecha']} | Pieza: {ficha['pieza_dental']} | {ficha['tratamiento']}"):
+                                    st.write(f"**Tratamiento:** {ficha['tratamiento']}")
+                                    st.write(f"**Observaciones:** {ficha['observaciones']}")
+                                    if st.button("🗑️ Borrar este registro", key=f"del_h_{ficha['id']}"):
+                                        requests.delete(f"{API_URL}/historial/{ficha['id']}")
+                                        st.rerun()
+                        else:
+                            st.info("Este paciente es nuevo y aún no tiene registros en su historial.")
+                        
+                        st.write("---")
+                        st.subheader("➕ Agregar Nuevo Registro Médico")
+                        
+                        with st.form("form_historial", clear_on_submit=True):
+                            col_h1, col_h2 = st.columns(2)
+                            with col_h1:
+                                fecha_h = st.date_input("Fecha de atención")
+                            with col_h2:
+                                pieza_h = st.text_input("Pieza Dental (Ej: 36, 47 o 'General')")
+                            
+                            tratamiento_h = st.text_input("Tratamiento realizado")
+                            observaciones_h = st.text_area("Observaciones (Alergias, dolor, materiales usados...)")
+                            
+                            if st.form_submit_button("💾 Guardar en Historial"):
+                                if pieza_h and tratamiento_h:
+                                    datos_ficha = {
+                                        "paciente_id": pac_id,
+                                        "fecha": str(fecha_h),
+                                        "pieza_dental": pieza_h,
+                                        "tratamiento": tratamiento_h,
+                                        "observaciones": observaciones_h
+                                    }
+                                    requests.post(f"{API_URL}/historial/", json=datos_ficha)
+                                    st.success("¡Registro guardado exitosamente!")
+                                    st.rerun()
+                                else:
+                                    st.warning("Por favor completa la pieza dental y el tratamiento.")
+                else:
+                    st.warning("Todavía no hay pacientes registrados en el sistema.")
+            except:
+                st.error("Error conectando con la base de datos de historiales.")
