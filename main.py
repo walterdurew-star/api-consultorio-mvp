@@ -1,11 +1,11 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from pydantic import BaseModel
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 
-# 1. LA NUEVA BASE DE DATOS INMORTAL (PostgreSQL)
+# CONEXIÓN A POSTGRESQL (Tu Base de Datos Inmortal)
 SQLALCHEMY_DATABASE_URL = "postgresql://bd_consultorio_user:KnDYO5xF81u9dT9tY4hiS1VXb2TUQTB6@dpg-dam58nu7bikc738ccdpg-a.oregon-postgres.render.com/bd_consultorio"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
@@ -13,7 +13,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # ==========================================
-# MODELOS DE BASE DE DATOS (FASE 1, 2 y 3)
+# MODELOS DE BASE DE DATOS
 # ==========================================
 class Paciente(Base):
     __tablename__ = "pacientes"
@@ -34,7 +34,7 @@ class Servicio(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String)
     precio_sugerido = Column(Integer)
-    costo_real = Column(Integer, default=0) # NUEVO FASE 3: Para calcular la Ganancia Neta
+    costo_real = Column(Integer, default=0)
 
 class Pago(Base):
     __tablename__ = "pagos"
@@ -43,14 +43,13 @@ class Pago(Base):
     monto = Column(Integer)
     metodo_pago = Column(String)
 
-class Inventario(Base): # NUEVA TABLA FASE 3: Control de Materiales
+class Inventario(Base):
     __tablename__ = "inventario"
     id = Column(Integer, primary_key=True, index=True)
     nombre_material = Column(String)
     cantidad = Column(Integer)
     costo_unitario = Column(Integer)
 
-# Crear las tablas automáticamente
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -71,7 +70,7 @@ def get_db():
         db.close()
 
 # ==========================================
-# SCHEMAS (Validadores de datos)
+# SCHEMAS (Validadores)
 # ==========================================
 class PacienteCreate(BaseModel):
     nombre_completo: str
@@ -88,50 +87,35 @@ class ServicioCreate(BaseModel):
     precio_sugerido: int
     costo_real: Optional[int] = 0
 
+class InventarioCreate(BaseModel):
+    nombre_material: str
+    cantidad: int
+    costo_unitario: int
+
 class PagoCreate(BaseModel):
     turno_id: int
     monto: int
     metodo_pago: str
 
-class InventarioCreate(BaseModel):
-    nombre_material: str
-    cantidad: int
-    costo_unitario: int
+# --- NUEVO FASE 4: Schemas para Editar ---
+class ServicioUpdate(BaseModel):
+    nombre: Optional[str] = None
+    precio_sugerido: Optional[int] = None
+    costo_real: Optional[int] = None
+
+class InventarioUpdate(BaseModel):
+    nombre_material: Optional[str] = None
+    cantidad: Optional[int] = None
+    costo_unitario: Optional[int] = None
 
 # ==========================================
 # RUTAS DE LA API (Endpoints)
 # ==========================================
 @app.get("/")
 def read_root():
-    return {"mensaje": "API Consultorio ERP funcionando en la nube Inmortal"}
+    return {"mensaje": "API Consultorio ERP (Fase 4: Edición habilitada)"}
 
-# --- PACIENTES ---
-@app.post("/pacientes/")
-def crear_paciente(paciente: PacienteCreate, db: Session = Depends(get_db)):
-    db_pac = Paciente(**paciente.dict())
-    db.add(db_pac)
-    db.commit()
-    db.refresh(db_pac)
-    return db_pac
-
-@app.get("/pacientes/")
-def leer_pacientes(db: Session = Depends(get_db)):
-    return db.query(Paciente).all()
-
-# --- TURNOS ---
-@app.post("/turnos/")
-def crear_turno(turno: TurnoCreate, db: Session = Depends(get_db)):
-    db_turno = Turno(**turno.dict())
-    db.add(db_turno)
-    db.commit()
-    db.refresh(db_turno)
-    return db_turno
-
-@app.get("/turnos/")
-def leer_turnos(db: Session = Depends(get_db)):
-    return db.query(Turno).all()
-
-# --- SERVICIOS ---
+# --- SERVICIOS (Con Editar y Borrar) ---
 @app.post("/servicios/")
 def crear_servicio(servicio: ServicioCreate, db: Session = Depends(get_db)):
     db_serv = Servicio(**servicio.dict())
@@ -144,20 +128,32 @@ def crear_servicio(servicio: ServicioCreate, db: Session = Depends(get_db)):
 def leer_servicios(db: Session = Depends(get_db)):
     return db.query(Servicio).all()
 
-# --- PAGOS ---
-@app.post("/pagos/")
-def crear_pago(pago: PagoCreate, db: Session = Depends(get_db)):
-    db_pago = Pago(**pago.dict())
-    db.add(db_pago)
+@app.put("/servicios/{servicio_id}")
+def editar_servicio(servicio_id: int, serv_data: ServicioUpdate, db: Session = Depends(get_db)):
+    db_serv = db.query(Servicio).filter(Servicio.id == servicio_id).first()
+    if not db_serv:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado")
+    
+    if serv_data.nombre is not None:
+        db_serv.nombre = serv_data.nombre
+    if serv_data.precio_sugerido is not None:
+        db_serv.precio_sugerido = serv_data.precio_sugerido
+    if serv_data.costo_real is not None:
+        db_serv.costo_real = serv_data.costo_real
+        
     db.commit()
-    db.refresh(db_pago)
-    return db_pago
+    db.refresh(db_serv)
+    return db_serv
 
-@app.get("/pagos/")
-def leer_pagos(db: Session = Depends(get_db)):
-    return db.query(Pago).all()
+@app.delete("/servicios/{servicio_id}")
+def borrar_servicio(servicio_id: int, db: Session = Depends(get_db)):
+    db_serv = db.query(Servicio).filter(Servicio.id == servicio_id).first()
+    if db_serv:
+        db.delete(db_serv)
+        db.commit()
+    return {"mensaje": "Eliminado"}
 
-# --- INVENTARIO (FASE 3) ---
+# --- INVENTARIO (Con Editar y Borrar) ---
 @app.post("/inventario/")
 def crear_material(item: InventarioCreate, db: Session = Depends(get_db)):
     db_item = Inventario(**item.dict())
@@ -169,3 +165,74 @@ def crear_material(item: InventarioCreate, db: Session = Depends(get_db)):
 @app.get("/inventario/")
 def leer_inventario(db: Session = Depends(get_db)):
     return db.query(Inventario).all()
+
+@app.put("/inventario/{item_id}")
+def editar_inventario(item_id: int, item_data: InventarioUpdate, db: Session = Depends(get_db)):
+    db_item = db.query(Inventario).filter(Inventario.id == item_id).first()
+    if not db_item:
+        raise HTTPException(status_code=404)
+    
+    if item_data.nombre_material is not None:
+        db_item.nombre_material = item_data.nombre_material
+    if item_data.cantidad is not None:
+        db_item.cantidad = item_data.cantidad
+    if item_data.costo_unitario is not None:
+        db_item.costo_unitario = item_data.costo_unitario
+        
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+
+@app.delete("/inventario/{item_id}")
+def borrar_inventario(item_id: int, db: Session = Depends(get_db)):
+    db_item = db.query(Inventario).filter(Inventario.id == item_id).first()
+    if db_item:
+        db.delete(db_item)
+        db.commit()
+    return {"mensaje": "Eliminado"}
+
+# --- TURNOS (Con Cancelar/Borrar) ---
+@app.post("/turnos/")
+def crear_turno(turno: TurnoCreate, db: Session = Depends(get_db)):
+    db_turno = Turno(**turno.dict())
+    db.add(db_turno)
+    db.commit()
+    db.refresh(db_turno)
+    return db_turno
+
+@app.get("/turnos/")
+def leer_turnos(db: Session = Depends(get_db)):
+    return db.query(Turno).all()
+
+@app.delete("/turnos/{turno_id}")
+def borrar_turno(turno_id: int, db: Session = Depends(get_db)):
+    db_turno = db.query(Turno).filter(Turno.id == turno_id).first()
+    if db_turno:
+        db.delete(db_turno)
+        db.commit()
+    return {"mensaje": "Turno cancelado"}
+
+# --- PACIENTES Y PAGOS (Mantienen igual) ---
+@app.post("/pacientes/")
+def crear_paciente(paciente: PacienteCreate, db: Session = Depends(get_db)):
+    db_pac = Paciente(**paciente.dict())
+    db.add(db_pac)
+    db.commit()
+    db.refresh(db_pac)
+    return db_pac
+
+@app.get("/pacientes/")
+def leer_pacientes(db: Session = Depends(get_db)):
+    return db.query(Paciente).all()
+
+@app.post("/pagos/")
+def crear_pago(pago: PagoCreate, db: Session = Depends(get_db)):
+    db_pago = Pago(**pago.dict())
+    db.add(db_pago)
+    db.commit()
+    db.refresh(db_pago)
+    return db_pago
+
+@app.get("/pagos/")
+def leer_pagos(db: Session = Depends(get_db)):
+    return db.query(Pago).all()
