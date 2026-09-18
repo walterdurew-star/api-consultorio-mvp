@@ -1,11 +1,14 @@
 import streamlit as st
 import requests
-import urllib.parse
 
 # --- CONEXIÓN A LA NUBE ---
 API_URL = "https://api-consultorio-mvp.onrender.com"
 
 st.set_page_config(page_title="Portal Odontológico ERP", page_icon="🦷", layout="wide")
+
+# Inicializar la memoria de sesión para el Login
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
 st.sidebar.title("🦷 Menú Principal")
 menu = st.sidebar.radio("Navegación:", ["Portal del Paciente", "Panel del Doctor 👨‍⚕️"])
@@ -69,10 +72,20 @@ if menu == "Portal del Paciente":
 elif menu == "Panel del Doctor 👨‍⚕️":
     st.title("👨‍⚕️ Panel de Administración ERP")
     
-    password = st.text_input("Ingresa la clave de acceso:", type="password")
-    
-    if password == "admin123":
-        
+    # SISTEMA DE LOGIN MEJORADO
+    if not st.session_state.logged_in:
+        password = st.text_input("Ingresa la clave de acceso:", type="password")
+        if password == "admin123":
+            st.session_state.logged_in = True
+            st.rerun()
+        elif password != "":
+            st.error("Contraseña incorrecta")
+
+    if st.session_state.logged_in:
+        if st.sidebar.button("🔒 Cerrar Sesión"):
+            st.session_state.logged_in = False
+            st.rerun()
+            
         tab1, tab2, tab3, tab4 = st.tabs(["📅 Agenda", "⚙️ Servicios y Costos", "💰 Finanzas", "📦 Inventario"])
         
         # --- PESTAÑA 1: AGENDA ---
@@ -93,55 +106,81 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                         with st.expander(f"🦷 {paciente.get('nombre_completo', 'N/A')} - {turno['fecha_hora'][:10]}"):
                             st.write(f"**Tratamiento:** {turno['tratamiento']}")
                             st.write(f"**Estado del Turno:** {turno['estado']}")
-                            if paciente.get("telefono"):
-                                st.link_button("📲 Enviar Recordatorio WhatsApp", f"https://wa.me/{paciente['telefono']}?text=Hola, recordatorio de tu turno...")
+                            
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                if paciente.get("telefono"):
+                                    st.link_button("📲 Enviar WhatsApp", f"https://wa.me/{paciente['telefono']}?text=Hola, recordatorio de tu turno...")
+                            with col_b:
+                                if st.button("🗑️ Cancelar Turno", key=f"del_turno_{turno['id']}"):
+                                    requests.delete(f"{API_URL}/turnos/{turno['id']}")
+                                    st.rerun()
                 else:
                     st.info("¡Excelente! No hay turnos pendientes.")
             except:
                 st.error("Esperando conexión...")
 
-        # --- PESTAÑA 2: CARGAR PRECIOS Y COSTOS ---
+        # --- PESTAÑA 2: CARGAR, EDITAR Y BORRAR SERVICIOS ---
         with tab2:
-            st.subheader("Agregar Servicio (Precio y Costo)")
-            
-            # EL SECRETO: clear_on_submit=True vacía todo al guardar
+            st.subheader("Agregar Servicio Nuevo")
             with st.form("form_servicios", clear_on_submit=True):
                 nuevo_nombre = st.text_input("Nombre del Servicio (Ej: Profilaxis)")
-                
                 col1, col2 = st.columns(2)
                 with col1:
-                    precio_texto = st.text_input("Precio a cobrar al paciente (₲)", placeholder="Ej: 150.000")
+                    precio_texto = st.text_input("Precio a cobrar (₲)", placeholder="Ej: 150.000")
                 with col2:
-                    costo_texto = st.text_input("Costo interno de materiales (₲)", placeholder="Ej: 30.000")
+                    costo_texto = st.text_input("Costo de materiales (₲)", placeholder="Ej: 30.000")
                 
-                if st.form_submit_button("Guardar Servicio"):
+                if st.form_submit_button("Guardar Servicio Nuevo"):
                     p_limpio = ''.join(filter(str.isdigit, precio_texto))
                     c_limpio = ''.join(filter(str.isdigit, costo_texto))
-                    
                     nuevo_precio = int(p_limpio) if p_limpio else 0
                     nuevo_costo = int(c_limpio) if c_limpio else 0
                     
                     if nuevo_nombre and nuevo_precio > 0:
-                        requests.post(f"{API_URL}/servicios/", json={
-                            "nombre": nuevo_nombre, 
-                            "precio_sugerido": nuevo_precio,
-                            "costo_real": nuevo_costo
-                        })
+                        requests.post(f"{API_URL}/servicios/", json={"nombre": nuevo_nombre, "precio_sugerido": nuevo_precio, "costo_real": nuevo_costo})
                         st.success("Servicio guardado exitosamente.")
                         st.rerun()
 
-            # LA MEJORA VISUAL: Ver lo que acabas de cargar con formato perfecto
             st.write("---")
-            st.write("### Catálogo Actual de Servicios")
+            st.subheader("Catálogo y Edición")
             try:
                 res_serv_admin = requests.get(f"{API_URL}/servicios/").json()
                 if res_serv_admin:
-                    for s in reversed(res_serv_admin): # reversed para que el más nuevo salga arriba
-                        precio_str = f"₲ {s['precio_sugerido']:,}".replace(",", ".")
-                        costo_str = f"₲ {s['costo_real']:,}".replace(",", ".")
-                        st.info(f"**{s['nombre']}** | Precio a cobrar: {precio_str} | Costo interno: {costo_str}")
+                    # Mostrar la lista visual primero
+                    with st.expander("👀 Ver Lista Completa de Servicios", expanded=False):
+                        for s in res_serv_admin:
+                            st.write(f"**{s['nombre']}** | Precio: ₲ {s['precio_sugerido']:,}".replace(",", ".") + f" | Costo: ₲ {s['costo_real']:,}".replace(",", "."))
+                    
+                    # El menú para editar (Con el BUG SOLUCIONADO)
+                    opciones_serv = {s["nombre"]: s for s in res_serv_admin}
+                    serv_sel = st.selectbox("Selecciona un servicio para modificar:", list(opciones_serv.keys()))
+                    
+                    if serv_sel:
+                        datos_s = opciones_serv[serv_sel]
+                        
+                        col_e1, col_e2, col_e3 = st.columns(3)
+                        with col_e1:
+                            # Se agregó el ID al final del "key" para evitar el bug de memoria
+                            edit_nombre = st.text_input("Nombre", value=datos_s["nombre"], key=f"en_{datos_s['id']}")
+                        with col_e2:
+                            edit_precio = st.text_input("Precio (₲)", value=f"{datos_s['precio_sugerido']:,}".replace(",","."), key=f"ep_{datos_s['id']}")
+                        with col_e3:
+                            edit_costo = st.text_input("Costo (₲)", value=f"{datos_s['costo_real']:,}".replace(",","."), key=f"ec_{datos_s['id']}")
+                        
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("💾 Guardar Cambios de Servicio", type="primary"):
+                                p_limpio = int(''.join(filter(str.isdigit, edit_precio)) or 0)
+                                c_limpio = int(''.join(filter(str.isdigit, edit_costo)) or 0)
+                                requests.put(f"{API_URL}/servicios/{datos_s['id']}", json={"nombre": edit_nombre, "precio_sugerido": p_limpio, "costo_real": c_limpio})
+                                st.rerun()
+                        with col_btn2:
+                            if st.button("🚨 Borrar Servicio"):
+                                requests.delete(f"{API_URL}/servicios/{datos_s['id']}")
+                                st.rerun()
                 else:
-                    st.write("No hay servicios cargados aún.")
+                    st.write("No hay servicios cargados.")
             except:
                 pass
 
@@ -199,22 +238,20 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                     monto_limpio = ''.join(filter(str.isdigit, monto_texto))
                     monto_cobrar = int(monto_limpio) if monto_limpio else 0
                     
-                    st.info(f"🧾 Se registrará un cobro por: **₲ {monto_cobrar:,}**".replace(",", "."))
                     metodo = st.selectbox("Método de Pago:", ["Efectivo", "Transferencia", "Tarjeta"])
                     
                     if st.button("Registrar Cobro"):
                         requests.post(f"{API_URL}/pagos/", json={"turno_id": turno_datos['id'], "monto": monto_cobrar, "metodo_pago": metodo})
+                        st.success("¡Cobro registrado! Verás la actualización en el Dashboard.")
                         st.rerun() 
                 else:
                     st.success("No hay turnos pendientes de cobro.")
             except:
                 st.warning("Cargando datos financieros...")
 
-        # --- PESTAÑA 4: INVENTARIO DE MATERIALES ---
+        # --- PESTAÑA 4: CARGAR, EDITAR Y BORRAR INVENTARIO ---
         with tab4:
-            st.subheader("📦 Gestión de Inventario")
-            
-            # EL SECRETO: También limpia las cajas del inventario
+            st.subheader("📦 Agregar Material Nuevo")
             with st.form("form_inventario", clear_on_submit=True):
                 nombre_material = st.text_input("Nombre del Material (Ej: Resina A2)")
                 col_cant, col_cost = st.columns(2)
@@ -228,23 +265,46 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                     costo_final = int(costo_u_limpio) if costo_u_limpio else 0
                     
                     if nombre_material and cantidad > 0:
-                        requests.post(f"{API_URL}/inventario/", json={
-                            "nombre_material": nombre_material,
-                            "cantidad": cantidad,
-                            "costo_unitario": costo_final
-                        })
+                        requests.post(f"{API_URL}/inventario/", json={"nombre_material": nombre_material, "cantidad": cantidad, "costo_unitario": costo_final})
                         st.success("¡Material agregado al inventario!")
                         st.rerun()
 
             st.write("---")
-            st.write("### Stock Actual")
+            st.subheader("Stock Actual y Edición")
             try:
                 inventario = requests.get(f"{API_URL}/inventario/").json()
                 if inventario:
-                    for item in reversed(inventario):
-                        cost_str = f"₲ {item['costo_unitario']:,}".replace(",", ".")
-                        st.info(f"**{item['nombre_material']}** | Stock: {item['cantidad']} unidades | Costo: {cost_str}")
+                    # Lista visual restaurada
+                    with st.expander("📦 Ver Todo el Stock Actual", expanded=True):
+                        for item in inventario:
+                            st.info(f"**{item['nombre_material']}** | Cantidad: {item['cantidad']} | Costo Un.: ₲ {item['costo_unitario']:,}".replace(",", "."))
+
+                    # El menú para editar (Con el BUG SOLUCIONADO)
+                    opciones_inv = {i["nombre_material"]: i for i in inventario}
+                    inv_sel = st.selectbox("Selecciona un material para modificar:", list(opciones_inv.keys()))
+                    
+                    if inv_sel:
+                        datos_i = opciones_inv[inv_sel]
+                        
+                        col_i1, col_i2, col_i3 = st.columns(3)
+                        with col_i1:
+                            edit_mat = st.text_input("Material", value=datos_i["nombre_material"], key=f"im_{datos_i['id']}")
+                        with col_i2:
+                            edit_cant = st.number_input("Cantidad", value=datos_i["cantidad"], step=1, key=f"ic_{datos_i['id']}")
+                        with col_i3:
+                            edit_cost_i = st.text_input("Costo Un. (₲)", value=f"{datos_i['costo_unitario']:,}".replace(",","."), key=f"icu_{datos_i['id']}")
+                        
+                        col_btni1, col_btni2 = st.columns(2)
+                        with col_btni1:
+                            if st.button("💾 Actualizar Stock", type="primary"):
+                                c_limpio = int(''.join(filter(str.isdigit, edit_cost_i)) or 0)
+                                requests.put(f"{API_URL}/inventario/{datos_i['id']}", json={"nombre_material": edit_mat, "cantidad": edit_cant, "costo_unitario": c_limpio})
+                                st.rerun()
+                        with col_btni2:
+                            if st.button("🚨 Borrar Material"):
+                                requests.delete(f"{API_URL}/inventario/{datos_i['id']}")
+                                st.rerun()
                 else:
                     st.write("El inventario está vacío.")
             except:
-                st.write("Cargando inventario...")
+                pass

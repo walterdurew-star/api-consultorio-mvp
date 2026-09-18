@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from pydantic import BaseModel
 from typing import List, Optional
@@ -50,6 +50,16 @@ class Inventario(Base):
     cantidad = Column(Integer)
     costo_unitario = Column(Integer)
 
+# --- NUEVO FASE 5: HISTORIAL CLÍNICO ---
+class HistorialClinico(Base):
+    __tablename__ = "historial_clinico"
+    id = Column(Integer, primary_key=True, index=True)
+    paciente_id = Column(Integer, index=True)
+    fecha = Column(String)
+    pieza_dental = Column(String)
+    tratamiento = Column(String)
+    observaciones = Column(Text)
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -97,7 +107,6 @@ class PagoCreate(BaseModel):
     monto: int
     metodo_pago: str
 
-# --- NUEVO FASE 4: Schemas para Editar ---
 class ServicioUpdate(BaseModel):
     nombre: Optional[str] = None
     precio_sugerido: Optional[int] = None
@@ -108,14 +117,22 @@ class InventarioUpdate(BaseModel):
     cantidad: Optional[int] = None
     costo_unitario: Optional[int] = None
 
+# --- NUEVO FASE 5: Schema Historial ---
+class HistorialCreate(BaseModel):
+    paciente_id: int
+    fecha: str
+    pieza_dental: str
+    tratamiento: str
+    observaciones: str
+
 # ==========================================
 # RUTAS DE LA API (Endpoints)
 # ==========================================
 @app.get("/")
 def read_root():
-    return {"mensaje": "API Consultorio ERP (Fase 4: Edición habilitada)"}
+    return {"mensaje": "API Consultorio ERP (Fase 5: Historial Clínico)"}
 
-# --- SERVICIOS (Con Editar y Borrar) ---
+# --- SERVICIOS ---
 @app.post("/servicios/")
 def crear_servicio(servicio: ServicioCreate, db: Session = Depends(get_db)):
     db_serv = Servicio(**servicio.dict())
@@ -131,16 +148,9 @@ def leer_servicios(db: Session = Depends(get_db)):
 @app.put("/servicios/{servicio_id}")
 def editar_servicio(servicio_id: int, serv_data: ServicioUpdate, db: Session = Depends(get_db)):
     db_serv = db.query(Servicio).filter(Servicio.id == servicio_id).first()
-    if not db_serv:
-        raise HTTPException(status_code=404, detail="Servicio no encontrado")
-    
-    if serv_data.nombre is not None:
-        db_serv.nombre = serv_data.nombre
-    if serv_data.precio_sugerido is not None:
-        db_serv.precio_sugerido = serv_data.precio_sugerido
-    if serv_data.costo_real is not None:
-        db_serv.costo_real = serv_data.costo_real
-        
+    if serv_data.nombre is not None: db_serv.nombre = serv_data.nombre
+    if serv_data.precio_sugerido is not None: db_serv.precio_sugerido = serv_data.precio_sugerido
+    if serv_data.costo_real is not None: db_serv.costo_real = serv_data.costo_real
     db.commit()
     db.refresh(db_serv)
     return db_serv
@@ -153,7 +163,7 @@ def borrar_servicio(servicio_id: int, db: Session = Depends(get_db)):
         db.commit()
     return {"mensaje": "Eliminado"}
 
-# --- INVENTARIO (Con Editar y Borrar) ---
+# --- INVENTARIO ---
 @app.post("/inventario/")
 def crear_material(item: InventarioCreate, db: Session = Depends(get_db)):
     db_item = Inventario(**item.dict())
@@ -169,16 +179,9 @@ def leer_inventario(db: Session = Depends(get_db)):
 @app.put("/inventario/{item_id}")
 def editar_inventario(item_id: int, item_data: InventarioUpdate, db: Session = Depends(get_db)):
     db_item = db.query(Inventario).filter(Inventario.id == item_id).first()
-    if not db_item:
-        raise HTTPException(status_code=404)
-    
-    if item_data.nombre_material is not None:
-        db_item.nombre_material = item_data.nombre_material
-    if item_data.cantidad is not None:
-        db_item.cantidad = item_data.cantidad
-    if item_data.costo_unitario is not None:
-        db_item.costo_unitario = item_data.costo_unitario
-        
+    if item_data.nombre_material is not None: db_item.nombre_material = item_data.nombre_material
+    if item_data.cantidad is not None: db_item.cantidad = item_data.cantidad
+    if item_data.costo_unitario is not None: db_item.costo_unitario = item_data.costo_unitario
     db.commit()
     db.refresh(db_item)
     return db_item
@@ -191,7 +194,7 @@ def borrar_inventario(item_id: int, db: Session = Depends(get_db)):
         db.commit()
     return {"mensaje": "Eliminado"}
 
-# --- TURNOS (Con Cancelar/Borrar) ---
+# --- TURNOS ---
 @app.post("/turnos/")
 def crear_turno(turno: TurnoCreate, db: Session = Depends(get_db)):
     db_turno = Turno(**turno.dict())
@@ -212,7 +215,7 @@ def borrar_turno(turno_id: int, db: Session = Depends(get_db)):
         db.commit()
     return {"mensaje": "Turno cancelado"}
 
-# --- PACIENTES Y PAGOS (Mantienen igual) ---
+# --- PACIENTES Y PAGOS ---
 @app.post("/pacientes/")
 def crear_paciente(paciente: PacienteCreate, db: Session = Depends(get_db)):
     db_pac = Paciente(**paciente.dict())
@@ -236,3 +239,24 @@ def crear_pago(pago: PagoCreate, db: Session = Depends(get_db)):
 @app.get("/pagos/")
 def leer_pagos(db: Session = Depends(get_db)):
     return db.query(Pago).all()
+
+# --- NUEVO FASE 5: RUTAS HISTORIAL CLÍNICO ---
+@app.post("/historial/")
+def crear_historial(ficha: HistorialCreate, db: Session = Depends(get_db)):
+    db_ficha = HistorialClinico(**ficha.dict())
+    db.add(db_ficha)
+    db.commit()
+    db.refresh(db_ficha)
+    return db_ficha
+
+@app.get("/historial/")
+def leer_historiales(db: Session = Depends(get_db)):
+    return db.query(HistorialClinico).all()
+
+@app.delete("/historial/{ficha_id}")
+def borrar_historial(ficha_id: int, db: Session = Depends(get_db)):
+    db_ficha = db.query(HistorialClinico).filter(HistorialClinico.id == ficha_id).first()
+    if db_ficha:
+        db.delete(db_ficha)
+        db.commit()
+    return {"mensaje": "Eliminado"}
