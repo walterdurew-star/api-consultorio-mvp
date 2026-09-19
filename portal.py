@@ -28,11 +28,10 @@ def get_horarios_libres(fecha_str, turnos):
 # 0. PANTALLA DE INICIO (HOME)
 # ==========================================
 if st.session_state.vista == "Inicio":
-    # Si viene de agendar un turno con éxito, mostramos los globos aquí
     if st.session_state.turno_exito:
         st.balloons()
         st.success("🎉 ¡Tu turno ha sido agendado exitosamente! Te esperamos en la clínica. 🦷")
-        st.session_state.turno_exito = False # Apagamos el mensaje para que no salga siempre
+        st.session_state.turno_exito = False 
         st.write("---")
 
     st.markdown("<h1 style='text-align: center;'>🦷 Bienvenido a la Clínica Odontológica</h1>", unsafe_allow_html=True)
@@ -107,23 +106,28 @@ elif st.session_state.vista == "Paciente":
                 if nombre and telefono and hora_str:
                     fecha_hora = f"{fecha_str}T{hora_str}:00"
                     
-                    datos_pac = {"nombre_completo": nombre, "telefono": telefono}
-                    res_pac = requests.post(f"{API_URL}/pacientes/", json=datos_pac)
+                    # --- CANDADO DE ÚLTIMO SEGUNDO CONTRA DOBLE CLIC ---
+                    turnos_verificacion = requests.get(f"{API_URL}/turnos/").json()
+                    horarios_ocupados = [t["fecha_hora"] for t in turnos_verificacion]
                     
-                    if res_pac.status_code == 200:
-                        paciente_id = res_pac.json()["id"]
+                    if fecha_hora in horarios_ocupados:
+                        st.error("❌ Este horario acaba de ser ocupado. Por favor, elige otro.")
+                    else:
+                        datos_pac = {"nombre_completo": nombre, "telefono": telefono}
+                        res_pac = requests.post(f"{API_URL}/pacientes/", json=datos_pac)
                         
-                        datos_turno = {
-                            "paciente_id": paciente_id, "fecha_hora": fecha_hora, 
-                            "estado": "Pendiente", "tratamiento": ", ".join(opciones)
-                        }
-                        res_turno = requests.post(f"{API_URL}/turnos/", json=datos_turno)
-                        
-                        if res_turno.status_code == 200:
-                            # AQUÍ ESTÁ LA MAGIA: Le avisamos que fue un éxito y lo mandamos al inicio
-                            st.session_state.turno_exito = True
-                            st.session_state.vista = "Inicio"
-                            st.rerun()
+                        if res_pac.status_code == 200:
+                            paciente_id = res_pac.json()["id"]
+                            datos_turno = {
+                                "paciente_id": paciente_id, "fecha_hora": fecha_hora, 
+                                "estado": "Pendiente", "tratamiento": ", ".join(opciones)
+                            }
+                            res_turno = requests.post(f"{API_URL}/turnos/", json=datos_turno)
+                            
+                            if res_turno.status_code == 200:
+                                st.session_state.turno_exito = True
+                                st.session_state.vista = "Inicio"
+                                st.rerun()
                 else:
                     st.warning("Completa nombre, teléfono y selecciona un horario válido.")
     else:
@@ -197,12 +201,20 @@ elif st.session_state.vista == "Doctor":
                             if st.form_submit_button("Agendar Nuevo Paciente"):
                                 if nom_m and tel_m and trat_m and hora_m_str:
                                     f_h = f"{fec_m}T{hora_m_str}:00"
-                                    rp = requests.post(f"{API_URL}/pacientes/", json={"nombre_completo": nom_m, "telefono": tel_m})
-                                    if rp.status_code == 200:
-                                        p_id = rp.json()["id"]
-                                        requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_m)})
-                                        st.success("¡Turno guardado exitosamente!")
-                                        st.rerun()
+                                    
+                                    # --- CANDADO DOCTOR ---
+                                    turnos_verificacion = requests.get(f"{API_URL}/turnos/").json()
+                                    horarios_ocupados = [t["fecha_hora"] for t in turnos_verificacion]
+                                    
+                                    if f_h in horarios_ocupados:
+                                        st.error("❌ Este horario acaba de ser ocupado. Elige otro.")
+                                    else:
+                                        rp = requests.post(f"{API_URL}/pacientes/", json={"nombre_completo": nom_m, "telefono": tel_m})
+                                        if rp.status_code == 200:
+                                            p_id = rp.json()["id"]
+                                            requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_m)})
+                                            st.success("¡Turno guardado exitosamente!")
+                                            st.rerun()
                                 else:
                                     st.warning("Completa todos los datos y selecciona una hora.")
 
@@ -226,10 +238,18 @@ elif st.session_state.vista == "Doctor":
                                 if st.form_submit_button("Agendar a Paciente Existente"):
                                     if pac_sel_exist != "Seleccionar..." and trat_me and hora_me_str:
                                         f_h = f"{fec_me}T{hora_me_str}:00"
-                                        p_id = dic_pac_exist[pac_sel_exist]
-                                        requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_me)})
-                                        st.success("¡Turno guardado exitosamente!")
-                                        st.rerun()
+                                        
+                                        # --- CANDADO DOCTOR ---
+                                        turnos_verificacion = requests.get(f"{API_URL}/turnos/").json()
+                                        horarios_ocupados = [t["fecha_hora"] for t in turnos_verificacion]
+                                        
+                                        if f_h in horarios_ocupados:
+                                            st.error("❌ Este horario acaba de ser ocupado. Elige otro.")
+                                        else:
+                                            p_id = dic_pac_exist[pac_sel_exist]
+                                            requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_me)})
+                                            st.success("¡Turno guardado exitosamente!")
+                                            st.rerun()
                                     else:
                                         st.warning("Selecciona paciente, tratamientos y hora.")
                         else:
