@@ -6,19 +6,48 @@ API_URL = "https://api-consultorio-mvp.onrender.com"
 
 st.set_page_config(page_title="Portal Odontológico ERP", page_icon="🦷", layout="wide")
 
-# Inicializar la memoria de sesión para el Login
+# Inicializar la memoria de sesión
+if "vista" not in st.session_state:
+    st.session_state.vista = "Inicio"
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
-st.sidebar.title("🦷 Menú Principal")
-menu = st.sidebar.radio("Navegación:", ["Portal del Paciente", "Panel del Doctor 👨‍⚕️"])
+# ==========================================
+# 0. PANTALLA DE INICIO (HOME)
+# ==========================================
+if st.session_state.vista == "Inicio":
+    st.markdown("<h1 style='text-align: center;'>🦷 Bienvenido a la Clínica Odontológica</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: gray;'>¿Cómo deseas ingresar?</h3>", unsafe_allow_html=True)
+    
+    st.write("---")
+    st.write("")
+    
+    col1, col2, col3, col4 = st.columns([1, 2, 2, 1]) # Esto centra los botones
+    
+    with col2:
+        if st.button("👤 Soy Paciente\n(Agendar Turno)", use_container_width=True):
+            st.session_state.vista = "Paciente"
+            st.rerun()
+            
+    with col3:
+        if st.button("👨‍⚕️ Soy Doctor\n(Ingresar al ERP)", use_container_width=True):
+            st.session_state.vista = "Doctor"
+            st.rerun()
+            
+    st.write("")
+    st.markdown("<p style='text-align: center; font-size: small;'>Software Odontológico ERP - Desarrollado por Walter</p>", unsafe_allow_html=True)
+
 
 # ==========================================
 # 1. PORTAL DEL PACIENTE (PÚBLICO)
 # ==========================================
-if menu == "Portal del Paciente":
-    st.title("🦷 Clínica Odontológica")
-    st.subheader("Autogestión de Presupuestos y Turnos")
+elif st.session_state.vista == "Paciente":
+    if st.button("⬅️ Volver al Inicio"):
+        st.session_state.vista = "Inicio"
+        st.rerun()
+        
+    st.title("🦷 Autogestión de Pacientes")
+    st.subheader("Calcula tu presupuesto y agenda tu turno")
 
     try:
         res_serv = requests.get(f"{API_URL}/servicios/")
@@ -66,10 +95,23 @@ if menu == "Portal del Paciente":
     else:
         st.warning("⚠️ El catálogo está vacío. El doctor debe agregar servicios.")
 
+
 # ==========================================
 # 2. PANEL DEL DOCTOR (PRIVADO - ERP)
 # ==========================================
-elif menu == "Panel del Doctor 👨‍⚕️":
+elif st.session_state.vista == "Doctor":
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("⬅️ Volver al Inicio"):
+            st.session_state.vista = "Inicio"
+            st.session_state.logged_in = False
+            st.rerun()
+    with col_btn2:
+        if st.session_state.logged_in:
+            if st.button("🔒 Cerrar Sesión"):
+                st.session_state.logged_in = False
+                st.rerun()
+
     st.title("👨‍⚕️ Panel de Administración ERP")
     
     if not st.session_state.logged_in:
@@ -81,10 +123,6 @@ elif menu == "Panel del Doctor 👨‍⚕️":
             st.error("Contraseña incorrecta")
 
     if st.session_state.logged_in:
-        if st.sidebar.button("🔒 Cerrar Sesión"):
-            st.session_state.logged_in = False
-            st.rerun()
-            
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📅 Agenda", "⚙️ Servicios y Costos", "💰 Finanzas", "📦 Inventario", "🩺 Historial Clínico"])
         
         # --- PESTAÑA 1: AGENDA ---
@@ -172,11 +210,10 @@ elif menu == "Panel del Doctor 👨‍⚕️":
                     for turno in turnos_pendientes:
                         paciente = dic_pacientes.get(turno["paciente_id"], {})
                         
-                        # --- MEJORA: MOSTRAR FECHA Y HORA SEPARADAS ---
                         fecha_hora_raw = turno['fecha_hora']
                         if "T" in fecha_hora_raw:
                             fecha_t, hora_t = fecha_hora_raw.split("T")
-                            hora_limpia = hora_t[:5] # Se queda solo con HH:MM
+                            hora_limpia = hora_t[:5] 
                             titulo_expander = f"🦷 {paciente.get('nombre_completo', 'N/A')} | 📅 {fecha_t} | ⏰ {hora_limpia} hs"
                         else:
                             titulo_expander = f"🦷 {paciente.get('nombre_completo', 'N/A')} - {fecha_hora_raw}"
