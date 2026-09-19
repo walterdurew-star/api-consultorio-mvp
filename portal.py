@@ -22,7 +22,7 @@ if st.session_state.vista == "Inicio":
     st.write("---")
     st.write("")
     
-    col1, col2, col3, col4 = st.columns([1, 2, 2, 1]) # Esto centra los botones
+    col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
     
     with col2:
         if st.button("👤 Soy Paciente\n(Agendar Turno)", use_container_width=True):
@@ -74,22 +74,33 @@ elif st.session_state.vista == "Paciente":
             
             if st.button("¡Confirmar mi Turno!"):
                 if nombre and telefono:
-                    datos_pac = {"nombre_completo": nombre, "telefono": telefono}
-                    res_pac = requests.post(f"{API_URL}/pacientes/", json=datos_pac)
+                    fecha_hora = f"{fecha_str}T{hora.strftime('%H:%M:%S')}"
                     
-                    if res_pac.status_code == 200:
-                        paciente_id = res_pac.json()["id"]
-                        fecha_hora = f"{fecha_str}T{hora.strftime('%H:%M:%S')}"
+                    # --- VALIDACIÓN DE DOBLE TURNO ---
+                    try:
+                        turnos_actuales = requests.get(f"{API_URL}/turnos/").json()
+                        horarios_ocupados = [t["fecha_hora"] for t in turnos_actuales]
+                    except:
+                        horarios_ocupados = []
+
+                    if fecha_hora in horarios_ocupados:
+                        st.error("❌ ¡Ups! Ese día y horario ya están reservados. Por favor, elige otra hora.")
+                    else:
+                        datos_pac = {"nombre_completo": nombre, "telefono": telefono}
+                        res_pac = requests.post(f"{API_URL}/pacientes/", json=datos_pac)
                         
-                        datos_turno = {
-                            "paciente_id": paciente_id, "fecha_hora": fecha_hora, 
-                            "estado": "Pendiente", "tratamiento": ", ".join(opciones)
-                        }
-                        res_turno = requests.post(f"{API_URL}/turnos/", json=datos_turno)
-                        
-                        if res_turno.status_code == 200:
-                            st.balloons()
-                            st.success("¡Turno agendado exitosamente!")
+                        if res_pac.status_code == 200:
+                            paciente_id = res_pac.json()["id"]
+                            
+                            datos_turno = {
+                                "paciente_id": paciente_id, "fecha_hora": fecha_hora, 
+                                "estado": "Pendiente", "tratamiento": ", ".join(opciones)
+                            }
+                            res_turno = requests.post(f"{API_URL}/turnos/", json=datos_turno)
+                            
+                            if res_turno.status_code == 200:
+                                st.balloons()
+                                st.success("¡Turno agendado exitosamente!")
                 else:
                     st.warning("Completa nombre y teléfono.")
     else:
@@ -157,13 +168,24 @@ elif st.session_state.vista == "Doctor":
                             
                             if st.form_submit_button("Agendar Nuevo Paciente"):
                                 if nom_m and tel_m and trat_m:
-                                    rp = requests.post(f"{API_URL}/pacientes/", json={"nombre_completo": nom_m, "telefono": tel_m})
-                                    if rp.status_code == 200:
-                                        p_id = rp.json()["id"]
-                                        f_h = f"{fec_m}T{hor_m.strftime('%H:%M:%S')}"
-                                        requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_m)})
-                                        st.success("¡Turno guardado exitosamente!")
-                                        st.rerun()
+                                    f_h = f"{fec_m}T{hor_m.strftime('%H:%M:%S')}"
+                                    
+                                    # --- VALIDACIÓN DE DOBLE TURNO ---
+                                    try:
+                                        turnos_actuales = requests.get(f"{API_URL}/turnos/").json()
+                                        horarios_ocupados = [t["fecha_hora"] for t in turnos_actuales]
+                                    except:
+                                        horarios_ocupados = []
+
+                                    if f_h in horarios_ocupados:
+                                        st.error("❌ Ese día y horario ya están ocupados en la agenda.")
+                                    else:
+                                        rp = requests.post(f"{API_URL}/pacientes/", json={"nombre_completo": nom_m, "telefono": tel_m})
+                                        if rp.status_code == 200:
+                                            p_id = rp.json()["id"]
+                                            requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_m)})
+                                            st.success("¡Turno guardado exitosamente!")
+                                            st.rerun()
                                 else:
                                     st.warning("Completa nombre, teléfono y tratamientos.")
 
@@ -183,11 +205,22 @@ elif st.session_state.vista == "Doctor":
                                 
                                 if st.form_submit_button("Agendar a Paciente Existente"):
                                     if pac_sel_exist != "Seleccionar..." and trat_me:
-                                        p_id = dic_pac_exist[pac_sel_exist]
                                         f_h = f"{fec_me}T{hor_me.strftime('%H:%M:%S')}"
-                                        requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_me)})
-                                        st.success("¡Turno guardado exitosamente!")
-                                        st.rerun()
+                                        
+                                        # --- VALIDACIÓN DE DOBLE TURNO ---
+                                        try:
+                                            turnos_actuales = requests.get(f"{API_URL}/turnos/").json()
+                                            horarios_ocupados = [t["fecha_hora"] for t in turnos_actuales]
+                                        except:
+                                            horarios_ocupados = []
+
+                                        if f_h in horarios_ocupados:
+                                            st.error("❌ Ese día y horario ya están ocupados en la agenda.")
+                                        else:
+                                            p_id = dic_pac_exist[pac_sel_exist]
+                                            requests.post(f"{API_URL}/turnos/", json={"paciente_id": p_id, "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_me)})
+                                            st.success("¡Turno guardado exitosamente!")
+                                            st.rerun()
                                     else:
                                         st.warning("Selecciona un paciente y los tratamientos.")
                         else:
