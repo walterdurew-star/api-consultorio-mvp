@@ -11,16 +11,16 @@ if "vista" not in st.session_state:
     st.session_state.vista = "Inicio"
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+if "turno_exito" not in st.session_state:
+    st.session_state.turno_exito = False
 
 # --- FUNCIÓN INTELIGENTE DE HORARIOS ---
-# Genera horarios cada 30 min entre las 8 y las 18 hs, y oculta los ocupados
 def get_horarios_libres(fecha_str, turnos):
     horarios_posibles = [f"{h:02d}:{m:02d}" for h in range(8, 19) for m in (0, 30)]
     if isinstance(turnos, list):
         ocupados = [t["fecha_hora"].split("T")[1][:5] for t in turnos if t.get("fecha_hora", "").startswith(fecha_str)]
     else:
         ocupados = []
-    # Devuelve solo los horarios que NO están en la lista de ocupados
     return [h for h in horarios_posibles if h not in ocupados]
 
 
@@ -28,6 +28,13 @@ def get_horarios_libres(fecha_str, turnos):
 # 0. PANTALLA DE INICIO (HOME)
 # ==========================================
 if st.session_state.vista == "Inicio":
+    # Si viene de agendar un turno con éxito, mostramos los globos aquí
+    if st.session_state.turno_exito:
+        st.balloons()
+        st.success("🎉 ¡Tu turno ha sido agendado exitosamente! Te esperamos en la clínica. 🦷")
+        st.session_state.turno_exito = False # Apagamos el mensaje para que no salga siempre
+        st.write("---")
+
     st.markdown("<h1 style='text-align: center;'>🦷 Bienvenido a la Clínica Odontológica</h1>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align: center; color: gray;'>¿Cómo deseas ingresar?</h3>", unsafe_allow_html=True)
     
@@ -83,7 +90,6 @@ elif st.session_state.vista == "Paciente":
             
             fecha_str = str(st.date_input("¿Qué día te gustaría venir?"))
             
-            # Traemos los turnos para saber cuáles horarios ocultar
             try:
                 turnos_actuales = requests.get(f"{API_URL}/turnos/").json()
             except:
@@ -114,8 +120,9 @@ elif st.session_state.vista == "Paciente":
                         res_turno = requests.post(f"{API_URL}/turnos/", json=datos_turno)
                         
                         if res_turno.status_code == 200:
-                            st.balloons()
-                            st.success("¡Turno agendado exitosamente!")
+                            # AQUÍ ESTÁ LA MAGIA: Le avisamos que fue un éxito y lo mandamos al inicio
+                            st.session_state.turno_exito = True
+                            st.session_state.vista = "Inicio"
                             st.rerun()
                 else:
                     st.warning("Completa nombre, teléfono y selecciona un horario válido.")
