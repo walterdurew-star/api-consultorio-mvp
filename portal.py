@@ -163,7 +163,66 @@ elif st.session_state.vista == "Doctor":
 
         # --- PESTAÑA AGENDA (Ambos roles) ---
         with tab_agenda:
-            # (Igual a tu código anterior: agendado manual y vista de pendientes)
+            with st.expander("➕ Agendar Turno Manual (Teléfono / Presencial)", expanded=False):
+                try:
+                    res_serv_manual = requests.get(f"{API_URL}/servicios/").json()
+                    catalogo_manual = [s["nombre"] for s in res_serv_manual] if res_serv_manual else []
+                    pacientes_manual = requests.get(f"{API_URL}/pacientes/").json()
+                    turnos_actuales_doc = requests.get(f"{API_URL}/turnos/").json()
+                except:
+                    catalogo_manual = []; pacientes_manual = []; turnos_actuales_doc = []
+
+                if catalogo_manual:
+                    tab_nuevo, tab_exist = st.tabs(["👤 Nuevo Paciente", "👥 Paciente Existente"])
+                    with tab_nuevo:
+                        with st.form("form_manual_nuevo", clear_on_submit=False):
+                            col_n1, col_n2 = st.columns(2)
+                            with col_n1: nom_m = st.text_input("Nombre y Apellido")
+                            with col_n2: tel_m = st.text_input("Teléfono")
+                            
+                            fec_m = st.date_input("Fecha del turno", key="fec_m")
+                            horarios_libres_doc = get_horarios_libres(str(fec_m), turnos_actuales_doc)
+                            if horarios_libres_doc: hora_m_str = st.selectbox("Hora", horarios_libres_doc, key="hora_m_sel")
+                            else: st.error("Día completo."); hora_m_str = None
+                                
+                            trat_m = st.multiselect("Tratamiento(s)", catalogo_manual, key="trat_m")
+                            
+                            if st.form_submit_button("Agendar Nuevo Paciente"):
+                                if nom_m and tel_m and trat_m and hora_m_str:
+                                    f_h = f"{fec_m}T{hora_m_str}:00"
+                                    if f_h in [t["fecha_hora"] for t in turnos_actuales_doc]:
+                                        st.error("❌ Horario ocupado.")
+                                    else:
+                                        rp = requests.post(f"{API_URL}/pacientes/", json={"nombre_completo": nom_m, "telefono": tel_m})
+                                        if rp.status_code == 200:
+                                            requests.post(f"{API_URL}/turnos/", json={"paciente_id": rp.json()["id"], "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_m)})
+                                            st.success("¡Turno guardado!"); st.rerun()
+                                else: st.warning("Completa todos los datos.")
+
+                    with tab_exist:
+                        if pacientes_manual:
+                            with st.form("form_manual_exist", clear_on_submit=False):
+                                dic_pac_exist = {f"{p['nombre_completo']} - {p['telefono']}": p["id"] for p in pacientes_manual}
+                                pac_sel_exist = st.selectbox("Buscar Paciente", ["Seleccionar..."] + list(dic_pac_exist.keys()))
+                                fec_me = st.date_input("Fecha del turno", key="fec_me")
+                                horarios_libres_doce = get_horarios_libres(str(fec_me), turnos_actuales_doc)
+                                if horarios_libres_doce: hora_me_str = st.selectbox("Hora", horarios_libres_doce, key="hora_me_sel")
+                                else: st.error("Día completo."); hora_me_str = None
+                                trat_me = st.multiselect("Tratamiento(s)", catalogo_manual, key="trat_me")
+                                
+                                if st.form_submit_button("Agendar Existente"):
+                                    if pac_sel_exist != "Seleccionar..." and trat_me and hora_me_str:
+                                        f_h = f"{fec_me}T{hora_me_str}:00"
+                                        if f_h in [t["fecha_hora"] for t in turnos_actuales_doc]:
+                                            st.error("❌ Horario ocupado.")
+                                        else:
+                                            requests.post(f"{API_URL}/turnos/", json={"paciente_id": dic_pac_exist[pac_sel_exist], "fecha_hora": f_h, "estado": "Pendiente", "tratamiento": ", ".join(trat_me)})
+                                            st.success("¡Turno guardado!"); st.rerun()
+                                    else: st.warning("Completa todos los datos.")
+                        else: st.info("Sin pacientes registrados.")
+                else: st.warning("Faltan servicios en el catálogo.")
+
+            st.write("---")
             st.subheader("📋 Turnos Pendientes de Atención")
             try:
                 turnos = requests.get(f"{API_URL}/turnos/").json()
@@ -229,20 +288,27 @@ elif st.session_state.vista == "Doctor":
                     serv_h = requests.get(f"{API_URL}/servicios/").json()
                     turn_h = requests.get(f"{API_URL}/turnos/").json()
                     
+                    dic_costos = {s["nombre"]: s.get("costo_real", 0) for s in serv_h}
+                    dic_turnos_trat = {t["id"]: t["tratamiento"] for t in turn_h}
+                    
+                    total_rec = sum(p["monto"] for p in pagos_h)
+                    total_cos = 0
+                    for p in pagos_h:
+                        trat_str = dic_turnos_trat.get(p["turno_id"], "")
+                        for tr in trat_str.split(", "):
+                            total_cos += dic_costos.get(tr, 0)
+                            
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Ingresos", f"₲ {int(total_rec):,}".replace(",", "."))
+                    col2.metric("Costos", f"₲ {int(total_cos):,}".replace(",", "."))
+                    col3.metric("Ganancia Neta", f"₲ {int(total_rec - total_cos):,}".replace(",", "."))
+                    
                     if pagos_h:
-                        # Calculamos ganancias totales
-                        total_rec = sum(p["monto"] for p in pagos_h)
-                        col1, col2 = st.columns(2)
-                        col1.metric("Ingresos Totales", f"₲ {int(total_rec):,}".replace(",", "."))
-                        
-                        # GRAFICOS
                         st.write("---")
                         st.write("#### Ingresos por Método de Pago")
                         df_pagos = pd.DataFrame(pagos_h)
                         grafico_metodos = df_pagos.groupby("metodo_pago")["monto"].sum()
                         st.bar_chart(grafico_metodos)
-                    else:
-                        st.info("Aún no hay cobros registrados para mostrar gráficos.")
                     
                     st.write("---")
                     st.subheader("💰 Registrar Cobro y Generar Recibo PDF")
@@ -276,7 +342,7 @@ elif st.session_state.vista == "Doctor":
                     # --- BOTON DE DESCARGA PDF ---
                     if st.session_state.ultimo_recibo:
                         st.write("---")
-                        st.success(f"Cobro de {st.session_state.ultimo_recibo['paciente']} procesado con éxito.")
+                        st.success(f"Cobro de {st.session_state.ultimo_recibo['paciente']} procesado.")
                         pdf_bytes = generar_pdf_recibo(
                             st.session_state.ultimo_recibo["paciente"], 
                             st.session_state.ultimo_recibo["monto"], 
@@ -284,16 +350,94 @@ elif st.session_state.vista == "Doctor":
                             st.session_state.ultimo_recibo["metodo"]
                         )
                         st.download_button(
-                            label="📄 DESCARGAR RECIBO EN PDF",
-                            data=pdf_bytes,
-                            file_name=f"Recibo_{st.session_state.ultimo_recibo['paciente']}.pdf",
-                            mime="application/pdf",
-                            type="primary"
+                            label="📄 DESCARGAR RECIBO EN PDF", data=pdf_bytes,
+                            file_name=f"Recibo_{st.session_state.ultimo_recibo['paciente']}.pdf", mime="application/pdf", type="primary"
                         )
-                except Exception as e:
-                    pass
+                except: pass
 
             with tab_servicios:
-                st.info("Aquí administras precios de servicios. (Activo para Doctor)")
+                st.subheader("Agregar Servicio Nuevo")
+                with st.form("form_servicios", clear_on_submit=True):
+                    nuevo_nombre = st.text_input("Nombre del Servicio (Ej: Profilaxis)")
+                    col1, col2 = st.columns(2)
+                    with col1: precio_texto = st.text_input("Precio a cobrar (₲)", placeholder="Ej: 150.000")
+                    with col2: costo_texto = st.text_input("Costo de materiales (₲)", placeholder="Ej: 30.000")
+                    if st.form_submit_button("Guardar Servicio Nuevo"):
+                        p_limpio = ''.join(filter(str.isdigit, precio_texto))
+                        c_limpio = ''.join(filter(str.isdigit, costo_texto))
+                        nuevo_precio = int(p_limpio) if p_limpio else 0
+                        nuevo_costo = int(c_limpio) if c_limpio else 0
+                        if nuevo_nombre and nuevo_precio > 0:
+                            requests.post(f"{API_URL}/servicios/", json={"nombre": nuevo_nombre, "precio_sugerido": nuevo_precio, "costo_real": nuevo_costo})
+                            st.success("Servicio guardado exitosamente."); st.rerun()
+
+                st.write("---")
+                st.subheader("Catálogo y Edición")
+                try:
+                    res_serv_admin = requests.get(f"{API_URL}/servicios/").json()
+                    if res_serv_admin:
+                        with st.expander("👀 Ver Lista Completa", expanded=False):
+                            for s in res_serv_admin:
+                                st.write(f"**{s['nombre']}** | Precio: ₲ {s['precio_sugerido']:,}".replace(",", ".") + f" | Costo: ₲ {s['costo_real']:,}".replace(",", "."))
+                        opciones_serv = {s["nombre"]: s for s in res_serv_admin}
+                        serv_sel = st.selectbox("Modificar servicio:", list(opciones_serv.keys()))
+                        if serv_sel:
+                            datos_s = opciones_serv[serv_sel]
+                            col_e1, col_e2, col_e3 = st.columns(3)
+                            with col_e1: edit_nombre = st.text_input("Nombre", value=datos_s["nombre"], key=f"en_{datos_s['id']}")
+                            with col_e2: edit_precio = st.text_input("Precio (₲)", value=f"{datos_s['precio_sugerido']:,}".replace(",","."), key=f"ep_{datos_s['id']}")
+                            with col_e3: edit_costo = st.text_input("Costo (₲)", value=f"{datos_s['costo_real']:,}".replace(",","."), key=f"ec_{datos_s['id']}")
+                            
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                if st.button("💾 Guardar Cambios", type="primary"):
+                                    p_limpio = int(''.join(filter(str.isdigit, edit_precio)) or 0)
+                                    c_limpio = int(''.join(filter(str.isdigit, edit_costo)) or 0)
+                                    requests.put(f"{API_URL}/servicios/{datos_s['id']}", json={"nombre": edit_nombre, "precio_sugerido": p_limpio, "costo_real": c_limpio})
+                                    st.rerun()
+                            with col_btn2:
+                                if st.button("🚨 Borrar Servicio"):
+                                    requests.delete(f"{API_URL}/servicios/{datos_s['id']}"); st.rerun()
+                except: pass
+
             with tab_inventario:
-                st.info("Aquí administras resinas, anestesias. (Activo para Doctor)")
+                st.subheader("📦 Agregar Material Nuevo")
+                with st.form("form_inventario", clear_on_submit=True):
+                    nombre_material = st.text_input("Nombre del Material (Ej: Resina A2)")
+                    col_cant, col_cost = st.columns(2)
+                    with col_cant: cantidad = st.number_input("Cantidad en Stock", min_value=0, step=1)
+                    with col_cost: costo_unitario_txt = st.text_input("Costo Unitario (₲)")
+                    if st.form_submit_button("Agregar Material"):
+                        costo_u_limpio = ''.join(filter(str.isdigit, costo_unitario_txt))
+                        costo_final = int(costo_u_limpio) if costo_u_limpio else 0
+                        if nombre_material and cantidad > 0:
+                            requests.post(f"{API_URL}/inventario/", json={"nombre_material": nombre_material, "cantidad": cantidad, "costo_unitario": costo_final})
+                            st.success("¡Material agregado!"); st.rerun()
+
+                st.write("---")
+                st.subheader("Stock Actual y Edición")
+                try:
+                    inventario = requests.get(f"{API_URL}/inventario/").json()
+                    if inventario:
+                        with st.expander("📦 Ver Todo el Stock", expanded=True):
+                            for item in inventario:
+                                st.info(f"**{item['nombre_material']}** | Cantidad: {item['cantidad']} | Costo Un.: ₲ {item['costo_unitario']:,}".replace(",", "."))
+                        opciones_inv = {i["nombre_material"]: i for i in inventario}
+                        inv_sel = st.selectbox("Modificar material:", list(opciones_inv.keys()))
+                        if inv_sel:
+                            datos_i = opciones_inv[inv_sel]
+                            col_i1, col_i2, col_i3 = st.columns(3)
+                            with col_i1: edit_mat = st.text_input("Material", value=datos_i["nombre_material"], key=f"im_{datos_i['id']}")
+                            with col_i2: edit_cant = st.number_input("Cantidad", value=datos_i["cantidad"], step=1, key=f"ic_{datos_i['id']}")
+                            with col_i3: edit_cost_i = st.text_input("Costo Un. (₲)", value=f"{datos_i['costo_unitario']:,}".replace(",","."), key=f"icu_{datos_i['id']}")
+                            
+                            col_btni1, col_btni2 = st.columns(2)
+                            with col_btni1:
+                                if st.button("💾 Actualizar Stock", type="primary"):
+                                    c_limpio = int(''.join(filter(str.isdigit, edit_cost_i)) or 0)
+                                    requests.put(f"{API_URL}/inventario/{datos_i['id']}", json={"nombre_material": edit_mat, "cantidad": edit_cant, "costo_unitario": c_limpio})
+                                    st.rerun()
+                            with col_btni2:
+                                if st.button("🚨 Borrar Material"):
+                                    requests.delete(f"{API_URL}/inventario/{datos_i['id']}"); st.rerun()
+                except: pass
